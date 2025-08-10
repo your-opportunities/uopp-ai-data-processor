@@ -39,15 +39,11 @@ htmlcov/
 *.log
 logs/
 
-# Railway files
-railway.json
-nixpacks.toml
-.railwayignore
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
 
 # Temporary files
 tmp/
 temp/
-
-# Docker
-Dockerfile
-.dockerignore
