@@ -1,6 +1,6 @@
 """Data models for the UOPP AI Data Processor."""
 
-from .message import ProcessingMessage, ProcessingResult
+from .message import ProcessingMessage, ProcessingResult, ProcessingStatus
 from .ukrainian_event import (
     UkrainianEvent, EventFormat, EventCategory,
     OpenRouterRequest, OpenRouterResponse, OpenRouterMessage,
@@ -8,7 +8,7 @@ from .ukrainian_event import (
 )
 
 __all__ = [
-    "ProcessingMessage", "ProcessingResult", 
+    "ProcessingMessage", "ProcessingResult", "ProcessingStatus",
     "UkrainianEvent", "EventFormat", "EventCategory",
     "OpenRouterRequest", "OpenRouterResponse", "OpenRouterMessage",
     "create_ukrainian_event_prompt"

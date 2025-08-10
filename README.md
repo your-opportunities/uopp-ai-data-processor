@@ -7,6 +7,7 @@ An asynchronous data processing service that consumes messages from RabbitMQ, pr
 - **Asynchronous Processing**: Built with asyncio for high-performance concurrent processing
 - **Message Queue Integration**: Consumes messages from RabbitMQ with automatic retry logic
 - **AI-Powered Extraction**: Uses OpenRouter API for intelligent Ukrainian event extraction
+- **Location Enrichment**: Google Maps geocoding for adding coordinates to events
 - **Persistent Storage**: Stores results in PostgreSQL with comprehensive tracking
 - **Structured Logging**: Comprehensive logging with structured output
 - **Health Monitoring**: Built-in health checks for all services
@@ -31,7 +32,9 @@ uopp-ai-data-processor/
 │   │   └── rabbitmq_repository.py
 │   ├── services/         # Business logic
 │   │   ├── __init__.py
-│   │   ├── deepseek_service.py
+│   │   ├── openrouter_service.py
+│   │   ├── google_maps_service.py
+│   │   ├── location_processing_service.py
 │   │   ├── data_processing_service.py
 │   │   └── rabbitmq_consumer_service.py  # Robust RabbitMQ consumer
 │   └── utils/            # Utilities
@@ -51,7 +54,8 @@ uopp-ai-data-processor/
 - Python 3.8+
 - RabbitMQ server
 - PostgreSQL database
-- DeepSeek API key
+- OpenRouter API key (for DeepSeek model)
+- Google Maps API key (for geocoding)
 
 ## Installation
 
@@ -109,6 +113,15 @@ OPENROUTER_RETRY_DELAY=1.0
 OPENROUTER_RATE_LIMIT_PER_MINUTE=60
 ```
 
+### Google Maps API Configuration
+```env
+GOOGLE_MAPS_API_KEY=your_google_maps_api_key_here
+GOOGLE_MAPS_RATE_LIMIT_PER_SECOND=50
+GOOGLE_MAPS_MAX_RETRIES=3
+GOOGLE_MAPS_RETRY_DELAY=1.0
+GOOGLE_MAPS_CACHE_TTL_SECONDS=3600
+```
+
 ### Application Configuration
 ```env
 APP_NAME=uopp-ai-data-processor
@@ -131,9 +144,10 @@ python main.py
 
 The service will:
 1. Connect to RabbitMQ and start consuming messages
-2. Process each message using DeepSeek API
-3. Store results in PostgreSQL
-4. Handle errors with retry logic
+2. Process each message using OpenRouter API (DeepSeek model)
+3. Enrich events with Google Maps coordinates
+4. Store results in PostgreSQL
+5. Handle errors with retry logic
 
 ### Sending Test Messages
 
@@ -204,6 +218,40 @@ asyncio.run(extract_event())
 
 See `examples/ukrainian_event_extraction.py` for a complete usage example.
 
+### Location Enrichment
+
+The location processing service can add Google Maps coordinates to events:
+
+```python
+from src.services.location_processing_service import LocationProcessingService
+from src.models.ukrainian_event import UkrainianEvent, EventCategory, EventFormat
+
+async def enrich_location():
+    service = LocationProcessingService()
+    await service.connect()
+    
+    event = UkrainianEvent(
+        title="Конференція в Києві",
+        is_asap=False,
+        is_regular_event=True,
+        format=EventFormat.OFFLINE,
+        categories=[EventCategory.CONFERENCE],
+        detailed_location="вул. Хрещатик, 1, Київ",
+        city="Київ"
+    )
+    
+    enriched_event = await service.enrich_event_location(event)
+    
+    print(f"Coordinates: {enriched_event.coordinates}")
+    print(f"Formatted Address: {enriched_event.formatted_address}")
+    print(f"Confidence: {enriched_event.location_confidence}")
+    
+    await service.disconnect()
+
+# Run enrichment
+asyncio.run(enrich_location())
+```
+
 ### Monitoring
 
 The service provides several monitoring endpoints and features:
@@ -253,18 +301,21 @@ mypy src/ main.py
 
 1. **DataProcessingService**: Main orchestrator that coordinates the entire pipeline
 2. **OpenRouterService**: Specialized service for Ukrainian event extraction
-3. **PostgresRepository**: Manages database operations and result storage
-4. **RabbitMQRepository**: Handles message publishing
-5. **RabbitMQConsumerService**: Robust consumer with reconnection and error handling
-6. **Configuration**: Centralized configuration management with Pydantic
+3. **LocationProcessingService**: Enriches events with Google Maps coordinates
+4. **GoogleMapsService**: Handles geocoding and reverse geocoding operations
+5. **PostgresRepository**: Manages database operations and result storage
+6. **RabbitMQRepository**: Handles message publishing
+7. **RabbitMQConsumerService**: Robust consumer with reconnection and error handling
+8. **Configuration**: Centralized configuration management with Pydantic
 
 ### Data Flow
 
 1. **Message Reception**: RabbitMQ consumer service receives messages with automatic reconnection
-2. **API Processing**: OpenRouter API extracts structured Ukrainian event data
-3. **Data Storage**: Events are stored in PostgreSQL with comprehensive indexing
-4. **Error Handling**: Robust error handling with message acknowledgment and retry logic
-5. **Monitoring**: Comprehensive logging and statistics throughout the pipeline
+2. **AI Processing**: OpenRouter API extracts structured Ukrainian event data
+3. **Location Enrichment**: Google Maps API adds coordinates and formatted addresses
+4. **Data Storage**: Events are stored in PostgreSQL with comprehensive indexing
+5. **Error Handling**: Robust error handling with message acknowledgment and retry logic
+6. **Monitoring**: Comprehensive logging and statistics throughout the pipeline
 
 ### Concurrency & Performance
 

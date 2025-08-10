@@ -76,6 +76,20 @@ class OpenRouterSettings(BaseSettings):
         extra = "ignore"
 
 
+class GoogleMapsSettings(BaseSettings):
+    """Google Maps API settings."""
+    
+    api_key: Optional[str] = Field(default=None, alias="GOOGLE_MAPS_API_KEY")
+    rate_limit_per_second: int = Field(default=50, alias="GOOGLE_MAPS_RATE_LIMIT_PER_SECOND")
+    max_retries: int = Field(default=3, alias="GOOGLE_MAPS_MAX_RETRIES")
+    retry_delay: float = Field(default=1.0, alias="GOOGLE_MAPS_RETRY_DELAY")
+    cache_ttl_seconds: int = Field(default=3600, alias="GOOGLE_MAPS_CACHE_TTL_SECONDS")
+    
+    class Config:
+        env_file = ".env"
+        extra = "ignore"
+
+
 class AppSettings(BaseSettings):
     """Application general settings."""
     
@@ -99,6 +113,7 @@ class Settings(BaseSettings):
     rabbitmq: RabbitMQSettings = RabbitMQSettings()
     postgres: PostgresSettings = PostgresSettings()
     openrouter: OpenRouterSettings = OpenRouterSettings()
+    google_maps: GoogleMapsSettings = GoogleMapsSettings()
     app: AppSettings = AppSettings()
     
     class Config:

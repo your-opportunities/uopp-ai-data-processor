@@ -1,6 +1,6 @@
 """Data models for Ukrainian event extraction."""
 
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Dict
 from pydantic import BaseModel, Field, validator
 from enum import Enum
 
@@ -76,6 +76,12 @@ class UkrainianEvent(BaseModel):
     price: Optional[Union[float, str]] = Field(None, description="Numeric value, 'free', or null")
     date: Optional[str] = Field(None, description="Event date in ISO format (YYYY-MM-DD) or null")
     deadline: Optional[str] = Field(None, description="Application deadline in ISO format (YYYY-MM-DD) or null")
+    
+    # Location data from Google Maps geocoding
+    coordinates: Optional[Dict[str, float]] = Field(None, description="Latitude and longitude coordinates")
+    formatted_address: Optional[str] = Field(None, description="Formatted address from Google Maps")
+    place_id: Optional[str] = Field(None, description="Google Maps place ID")
+    location_confidence: Optional[float] = Field(None, description="Confidence score for location accuracy (0.0-1.0)")
     
 
     

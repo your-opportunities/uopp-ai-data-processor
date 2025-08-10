@@ -11,6 +11,7 @@ from ..models.ukrainian_event import UkrainianEvent, EventCategory
 from ..repositories.rabbitmq_repository import RabbitMQRepository
 from ..repositories.event_repository import EventRepository
 from ..services.openrouter_service import OpenRouterService
+from ..services.location_processing_service import LocationProcessingService
 from ..services.rabbitmq_consumer_service import RabbitMQConsumerService
 from ..database.migration_manager import MigrationManager
 from ..utils.logger import get_logger
@@ -25,6 +26,7 @@ class DataProcessingService:
         self.event_repo = EventRepository()
         self.rabbitmq_repo = RabbitMQRepository()
         self.openrouter_service = OpenRouterService()
+        self.location_service = LocationProcessingService()
         self.consumer_service = RabbitMQConsumerService(self._process_message, self.rabbitmq_repo)
         self.migration_manager = MigrationManager()
         self._processing_semaphore: Optional[asyncio.Semaphore] = None
@@ -37,6 +39,7 @@ class DataProcessingService:
         self.api_calls_failed = 0
         self.db_operations_made = 0
         self.db_operations_failed = 0
+        self.locations_enriched = 0
     
     async def start(self) -> None:
         """Start the data processing service."""
@@ -53,6 +56,7 @@ class DataProcessingService:
             await self.event_repo.connect()
             await self.rabbitmq_repo.connect()
             await self.openrouter_service.connect()
+            await self.location_service.connect()
             
             # Start consuming messages using the consumer service
             await self.consumer_service.start()
@@ -76,6 +80,7 @@ class DataProcessingService:
             await self.consumer_service.stop()
             
             # Disconnect from services
+            await self.location_service.disconnect()
             await self.openrouter_service.disconnect()
             await self.rabbitmq_repo.disconnect()
             await self.event_repo.disconnect()
@@ -162,7 +167,28 @@ class DataProcessingService:
                 )
                 logger.info("Created fallback event for failed extraction", message_id=message.id)
             
-            # Step 2: Save event to database
+            # Step 2: Enrich event with location data
+            logger.info("Enriching event with location data", message_id=message.id)
+            try:
+                ukrainian_event = await self.location_service.enrich_event_location(ukrainian_event)
+                if ukrainian_event.coordinates:
+                    self.locations_enriched += 1
+                    logger.info(
+                        "Location enrichment successful",
+                        message_id=message.id,
+                        coordinates=ukrainian_event.coordinates
+                    )
+                else:
+                    logger.debug("No location data added to event", message_id=message.id)
+            except Exception as location_error:
+                logger.warning(
+                    "Location enrichment failed, continuing with original event",
+                    message_id=message.id,
+                    error=str(location_error)
+                )
+                # Continue processing even if location enrichment fails
+            
+            # Step 3: Save event to database
             logger.info("Saving event to database", message_id=message.id)
             try:
                 event_id = await self.event_repo.save_event(
@@ -222,6 +248,7 @@ class DataProcessingService:
             "event_repository": await self.event_repo.health_check(),
             "rabbitmq": await self.rabbitmq_repo.health_check(),
             "openrouter": await self.openrouter_service.health_check(),
+            "location_processing": await self.location_service.health_check(),
             "consumer": await self.consumer_service.health_check()
         }
     
@@ -241,6 +268,7 @@ class DataProcessingService:
                 "db_operations_made": self.db_operations_made,
                 "db_operations_failed": self.db_operations_failed,
                 "db_success_rate": (self.db_operations_made / max(self.db_operations_made + self.db_operations_failed, 1)) * 100,
+                "locations_enriched": self.locations_enriched,
             }
         }
         
