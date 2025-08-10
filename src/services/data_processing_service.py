@@ -7,10 +7,11 @@ from datetime import datetime
 
 from ..config.settings import settings
 from ..models.message import ProcessingMessage, ProcessingResult, ProcessingStatus
-from ..repositories.postgres_repository import PostgresRepository
 from ..repositories.rabbitmq_repository import RabbitMQRepository
+from ..repositories.event_repository import EventRepository
 from ..services.openrouter_service import OpenRouterService
 from ..services.rabbitmq_consumer_service import RabbitMQConsumerService
+from ..database.migration_manager import MigrationManager
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -20,10 +21,11 @@ class DataProcessingService:
     """Main service for processing data through the entire pipeline."""
     
     def __init__(self):
-        self.postgres_repo = PostgresRepository()
+        self.event_repo = EventRepository()
         self.rabbitmq_repo = RabbitMQRepository()
         self.openrouter_service = OpenRouterService()
         self.consumer_service = RabbitMQConsumerService(self._process_message)
+        self.migration_manager = MigrationManager()
         self._processing_semaphore: Optional[asyncio.Semaphore] = None
         self._running = False
     
@@ -35,13 +37,13 @@ class DataProcessingService:
             # Initialize semaphore for concurrent processing
             self._processing_semaphore = asyncio.Semaphore(settings.app.max_concurrent_processing)
             
+            # Run database migrations
+            await self.migration_manager.run_migrations()
+            
             # Connect to databases and services
-            await self.postgres_repo.connect()
+            await self.event_repo.connect()
             await self.rabbitmq_repo.connect()
             await self.openrouter_service.connect()
-            
-            # Create database tables
-            await self.postgres_repo.create_tables()
             
             # Start consuming messages using the consumer service
             await self.consumer_service.start()
@@ -67,7 +69,7 @@ class DataProcessingService:
             # Disconnect from services
             await self.openrouter_service.disconnect()
             await self.rabbitmq_repo.disconnect()
-            await self.postgres_repo.disconnect()
+            await self.event_repo.disconnect()
             
             logger.info("Data processing service stopped successfully")
             
@@ -118,33 +120,32 @@ class DataProcessingService:
             # Extract structured data using OpenRouter
             logger.info("Extracting structured data", message_id=message.id)
             ukrainian_event = await self.openrouter_service.extract_ukrainian_event(message.content)
-            structured_data = ukrainian_event.model_dump()
             
-            # Update progress
+            # Update progress (status tracking removed for simplicity)
             status.progress = 0.5
-            await self.postgres_repo.update_processing_status(status)
             
             # Calculate processing time
             processing_time = time.time() - start_time
             
-            # Create processing result
-            result = ProcessingResult(
-                message_id=message.id,
-                processed_content=structured_data,
-                processing_time=processing_time,
-                success=True,
-                model_used=settings.openrouter.model,
-                confidence_score=0.8  # Placeholder, could be extracted from API response
+            # Save event to database
+            event_id = await self.event_repo.save_event(
+                post_created_at=message.timestamp,
+                post_scraped_at=datetime.utcnow(),
+                raw_text=message.content,
+                ukrainian_event=ukrainian_event
             )
             
-            # Save result to database
-            await self.postgres_repo.save_processing_result(result)
+            logger.info(
+                "Event processed and saved successfully",
+                event_id=event_id,
+                message_id=message.id,
+                processing_time=processing_time
+            )
             
-            # Update final status
+            # Update final status (status tracking simplified)
             status.status = "completed"
             status.progress = 1.0
             status.completed_at = datetime.utcnow()
-            await self.postgres_repo.update_processing_status(status)
             
             logger.info(
                 "Message processed successfully",
@@ -155,11 +156,10 @@ class DataProcessingService:
         except Exception as e:
             processing_time = time.time() - start_time
             
-            # Update status to failed
+            # Update status to failed (status tracking simplified)
             status.status = "failed"
             status.error_details = str(e)
             status.completed_at = datetime.utcnow()
-            await self.postgres_repo.update_processing_status(status)
             
             logger.error(
                 "Message processing failed",
@@ -171,31 +171,16 @@ class DataProcessingService:
     
     async def _create_error_result(self, message: ProcessingMessage, error_message: str) -> None:
         """Create an error result for failed processing."""
-        result = ProcessingResult(
+        logger.error(
+            "Message processing failed after all retries",
             message_id=message.id,
-            processed_content={},
-            processing_time=0.0,
-            success=False,
-            error_message=error_message,
-            model_used=settings.openrouter.model
+            error=error_message
         )
-        
-        await self.postgres_repo.save_processing_result(result)
-        
-        # Update status
-        status = ProcessingStatus(
-            message_id=message.id,
-            status="failed",
-            progress=0.0,
-            error_details=error_message,
-            completed_at=datetime.utcnow()
-        )
-        await self.postgres_repo.update_processing_status(status)
     
     async def health_check(self) -> Dict[str, Any]:
         """Perform health check on all services."""
         return {
-            "postgres": await self.postgres_repo.pool is not None,
+            "event_repository": await self.event_repo.health_check(),
             "rabbitmq": await self.rabbitmq_repo.health_check(),
             "openrouter": await self.openrouter_service.health_check(),
             "consumer": await self.consumer_service.health_check()
@@ -203,7 +188,7 @@ class DataProcessingService:
     
     async def get_statistics(self) -> Dict[str, any]:
         """Get processing statistics."""
-        return await self.postgres_repo.get_statistics()
+        return await self.event_repo.get_statistics()
     
     async def get_queue_info(self) -> Dict[str, Any]:
         """Get RabbitMQ queue information."""
