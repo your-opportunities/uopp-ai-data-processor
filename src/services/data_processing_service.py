@@ -10,6 +10,7 @@ from ..models.message import ProcessingMessage, ProcessingResult, ProcessingStat
 from ..repositories.postgres_repository import PostgresRepository
 from ..repositories.rabbitmq_repository import RabbitMQRepository
 from ..services.deepseek_service import DeepSeekService
+from ..services.rabbitmq_consumer_service import RabbitMQConsumerService
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -22,6 +23,7 @@ class DataProcessingService:
         self.postgres_repo = PostgresRepository()
         self.rabbitmq_repo = RabbitMQRepository()
         self.deepseek_service = DeepSeekService()
+        self.consumer_service = RabbitMQConsumerService(self._process_message)
         self._processing_semaphore: Optional[asyncio.Semaphore] = None
         self._running = False
     
@@ -41,8 +43,8 @@ class DataProcessingService:
             # Create database tables
             await self.postgres_repo.create_tables()
             
-            # Start consuming messages
-            await self.rabbitmq_repo.start_consuming(self._process_message)
+            # Start consuming messages using the consumer service
+            await self.consumer_service.start()
             
             self._running = True
             logger.info("Data processing service started successfully")
@@ -60,7 +62,7 @@ class DataProcessingService:
         
         try:
             # Stop consuming messages
-            await self.rabbitmq_repo.stop_consuming()
+            await self.consumer_service.stop()
             
             # Disconnect from services
             await self.deepseek_service.disconnect()
@@ -189,21 +191,22 @@ class DataProcessingService:
         )
         await self.postgres_repo.update_processing_status(status)
     
-    async def health_check(self) -> Dict[str, bool]:
+    async def health_check(self) -> Dict[str, Any]:
         """Perform health check on all services."""
         return {
             "postgres": await self.postgres_repo.pool is not None,
             "rabbitmq": await self.rabbitmq_repo.health_check(),
-            "deepseek": await self.deepseek_service.health_check()
+            "deepseek": await self.deepseek_service.health_check(),
+            "consumer": await self.consumer_service.health_check()
         }
     
     async def get_statistics(self) -> Dict[str, any]:
         """Get processing statistics."""
         return await self.postgres_repo.get_statistics()
     
-    async def get_queue_info(self) -> Dict[str, any]:
+    async def get_queue_info(self) -> Dict[str, Any]:
         """Get RabbitMQ queue information."""
-        return await self.rabbitmq_repo.get_queue_info()
+        return await self.consumer_service.get_queue_info()
     
     def is_running(self) -> bool:
         """Check if the service is running."""

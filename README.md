@@ -32,10 +32,13 @@ uopp-ai-data-processor/
 │   ├── services/         # Business logic
 │   │   ├── __init__.py
 │   │   ├── deepseek_service.py
-│   │   └── data_processing_service.py
+│   │   ├── data_processing_service.py
+│   │   └── rabbitmq_consumer_service.py  # Robust RabbitMQ consumer
 │   └── utils/            # Utilities
 │       ├── __init__.py
 │       └── logger.py     # Logging configuration
+├── examples/             # Example scripts
+│   └── consumer_example.py  # RabbitMQ consumer usage example
 ├── main.py               # Application entry point
 ├── requirements.txt      # Python dependencies
 ├── env.template          # Environment variables template
@@ -153,6 +156,28 @@ message = {
 # Send to RabbitMQ queue
 ```
 
+### Using the Consumer Service
+
+The RabbitMQ consumer service can be used independently:
+
+```python
+from src.services.rabbitmq_consumer_service import RabbitMQConsumerService
+
+async def handle_message(message):
+    # Process the message
+    print(f"Processing: {message.content}")
+
+consumer = RabbitMQConsumerService(
+    message_handler=handle_message,
+    queue_name="my_queue",
+    prefetch_count=10
+)
+
+await consumer.start()
+```
+
+See `examples/consumer_example.py` for a complete usage example.
+
 ### Monitoring
 
 The service provides several monitoring endpoints and features:
@@ -203,16 +228,17 @@ mypy src/ main.py
 1. **DataProcessingService**: Main orchestrator that coordinates the entire pipeline
 2. **DeepSeekService**: Handles API calls to DeepSeek for data extraction
 3. **PostgresRepository**: Manages database operations and result storage
-4. **RabbitMQRepository**: Handles message consumption and publishing
-5. **Configuration**: Centralized configuration management with Pydantic
+4. **RabbitMQRepository**: Handles message publishing
+5. **RabbitMQConsumerService**: Robust consumer with reconnection and error handling
+6. **Configuration**: Centralized configuration management with Pydantic
 
 ### Data Flow
 
-1. **Message Reception**: RabbitMQ consumer receives messages
+1. **Message Reception**: RabbitMQ consumer service receives messages with automatic reconnection
 2. **Processing**: DeepSeek API extracts structured data
 3. **Storage**: Results are stored in PostgreSQL
 4. **Status Tracking**: Processing status is updated throughout the pipeline
-5. **Error Handling**: Failed messages are retried with exponential backoff
+5. **Error Handling**: Failed messages are retried with exponential backoff and dead letter queue support
 
 ### Concurrency
 
