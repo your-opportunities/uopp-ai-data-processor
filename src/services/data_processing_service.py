@@ -28,6 +28,14 @@ class DataProcessingService:
         self.migration_manager = MigrationManager()
         self._processing_semaphore: Optional[asyncio.Semaphore] = None
         self._running = False
+        
+        # Processing statistics
+        self.messages_processed = 0
+        self.messages_failed = 0
+        self.api_calls_made = 0
+        self.api_calls_failed = 0
+        self.db_operations_made = 0
+        self.db_operations_failed = 0
     
     async def start(self) -> None:
         """Start the data processing service."""
@@ -107,70 +115,74 @@ class DataProcessingService:
         """Internal message processing logic."""
         start_time = time.time()
         
-        # Update status to processing
-        status = ProcessingStatus(
-            message_id=message.id,
-            status="processing",
-            progress=0.0,
-            started_at=datetime.utcnow()
-        )
-        await self.postgres_repo.update_processing_status(status)
+        logger.info("Starting message processing", message_id=message.id)
         
         try:
-            # Extract structured data using OpenRouter
+            # Step 1: Extract structured data using OpenRouter
             logger.info("Extracting structured data", message_id=message.id)
-            ukrainian_event = await self.openrouter_service.extract_ukrainian_event(message.content)
+            try:
+                ukrainian_event = await self.openrouter_service.extract_ukrainian_event(message.content)
+                self.api_calls_made += 1
+                logger.info("API extraction successful", message_id=message.id)
+            except Exception as api_error:
+                self.api_calls_failed += 1
+                logger.error(
+                    "API extraction failed",
+                    message_id=message.id,
+                    error=str(api_error)
+                )
+                # Continue processing - skip DB insert but acknowledge message
+                self.messages_failed += 1
+                return
             
-            # Update progress (status tracking removed for simplicity)
-            status.progress = 0.5
+            # Step 2: Save event to database
+            logger.info("Saving event to database", message_id=message.id)
+            try:
+                event_id = await self.event_repo.save_event(
+                    post_created_at=message.timestamp,
+                    post_scraped_at=datetime.utcnow(),
+                    raw_text=message.content,
+                    ukrainian_event=ukrainian_event
+                )
+                self.db_operations_made += 1
+                logger.info("Database save successful", event_id=event_id, message_id=message.id)
+            except Exception as db_error:
+                self.db_operations_failed += 1
+                logger.error(
+                    "Database save failed",
+                    message_id=message.id,
+                    error=str(db_error)
+                )
+                # Continue processing - acknowledge message even if DB save failed
+                self.messages_failed += 1
+                return
             
-            # Calculate processing time
+            # Success - update statistics
             processing_time = time.time() - start_time
-            
-            # Save event to database
-            event_id = await self.event_repo.save_event(
-                post_created_at=message.timestamp,
-                post_scraped_at=datetime.utcnow(),
-                raw_text=message.content,
-                ukrainian_event=ukrainian_event
-            )
-            
-            logger.info(
-                "Event processed and saved successfully",
-                event_id=event_id,
-                message_id=message.id,
-                processing_time=processing_time
-            )
-            
-            # Update final status (status tracking simplified)
-            status.status = "completed"
-            status.progress = 1.0
-            status.completed_at = datetime.utcnow()
+            self.messages_processed += 1
             
             logger.info(
                 "Message processed successfully",
                 message_id=message.id,
+                event_id=event_id,
                 processing_time=processing_time
             )
             
         except Exception as e:
             processing_time = time.time() - start_time
-            
-            # Update status to failed (status tracking simplified)
-            status.status = "failed"
-            status.error_details = str(e)
-            status.completed_at = datetime.utcnow()
+            self.messages_failed += 1
             
             logger.error(
-                "Message processing failed",
+                "Unexpected error in message processing",
                 message_id=message.id,
                 processing_time=processing_time,
                 error=str(e)
             )
-            raise
+            # Don't re-raise - let the consumer acknowledge the message
     
     async def _create_error_result(self, message: ProcessingMessage, error_message: str) -> None:
         """Create an error result for failed processing."""
+        self.messages_failed += 1
         logger.error(
             "Message processing failed after all retries",
             message_id=message.id,
@@ -186,9 +198,26 @@ class DataProcessingService:
             "consumer": await self.consumer_service.health_check()
         }
     
-    async def get_statistics(self) -> Dict[str, any]:
+    async def get_statistics(self) -> Dict[str, Any]:
         """Get processing statistics."""
-        return await self.event_repo.get_statistics()
+        db_stats = await self.event_repo.get_statistics()
+        
+        # Add pipeline statistics
+        pipeline_stats = {
+            "pipeline": {
+                "messages_processed": self.messages_processed,
+                "messages_failed": self.messages_failed,
+                "success_rate": (self.messages_processed / max(self.messages_processed + self.messages_failed, 1)) * 100,
+                "api_calls_made": self.api_calls_made,
+                "api_calls_failed": self.api_calls_failed,
+                "api_success_rate": (self.api_calls_made / max(self.api_calls_made + self.api_calls_failed, 1)) * 100,
+                "db_operations_made": self.db_operations_made,
+                "db_operations_failed": self.db_operations_failed,
+                "db_success_rate": (self.db_operations_made / max(self.db_operations_made + self.db_operations_failed, 1)) * 100,
+            }
+        }
+        
+        return {**db_stats, **pipeline_stats}
     
     async def get_queue_info(self) -> Dict[str, Any]:
         """Get RabbitMQ queue information."""

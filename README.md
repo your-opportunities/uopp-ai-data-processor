@@ -266,16 +266,18 @@ mypy src/ main.py
 ### Data Flow
 
 1. **Message Reception**: RabbitMQ consumer service receives messages with automatic reconnection
-2. **Processing**: DeepSeek API extracts structured data
-3. **Storage**: Results are stored in PostgreSQL
-4. **Status Tracking**: Processing status is updated throughout the pipeline
-5. **Error Handling**: Failed messages are retried with exponential backoff and dead letter queue support
+2. **API Processing**: OpenRouter API extracts structured Ukrainian event data
+3. **Data Storage**: Events are stored in PostgreSQL with comprehensive indexing
+4. **Error Handling**: Robust error handling with message acknowledgment and retry logic
+5. **Monitoring**: Comprehensive logging and statistics throughout the pipeline
 
-### Concurrency
+### Concurrency & Performance
 
 - Uses asyncio for non-blocking I/O operations
 - Semaphore limits concurrent processing to prevent overload
 - Connection pooling for database and message queue connections
+- Rate limiting for API calls
+- Comprehensive performance monitoring and statistics
 
 ## Troubleshooting
 

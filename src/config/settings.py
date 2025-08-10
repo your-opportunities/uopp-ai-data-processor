@@ -8,14 +8,27 @@ from pydantic_settings import BaseSettings
 class RabbitMQSettings(BaseSettings):
     """RabbitMQ connection settings."""
     
-    host: str = Field(default="localhost", env="RABBITMQ_HOST")
-    port: int = Field(default=5672, env="RABBITMQ_PORT")
-    username: str = Field(default="guest", env="RABBITMQ_USERNAME")
-    password: str = Field(default="guest", env="RABBITMQ_PASSWORD")
-    virtual_host: str = Field(default="/", env="RABBITMQ_VIRTUAL_HOST")
+    url: str = Field(default="amqp://guest:guest@localhost:5672/", env="RABBITMQ_URL")
     queue_name: str = Field(default="data_processing_queue", env="RABBITMQ_QUEUE_NAME")
-    exchange_name: str = Field(default="data_processing_exchange", env="RABBITMQ_EXCHANGE_NAME")
-    routing_key: str = Field(default="data_processing", env="RABBITMQ_ROUTING_KEY")
+    
+    @property
+    def connection_params(self) -> dict:
+        """Parse RabbitMQ URL and return connection parameters."""
+        from urllib.parse import urlparse
+        
+        parsed = urlparse(self.url)
+        
+        # Handle SSL connections
+        if parsed.scheme == 'amqps':
+            return {
+                'url': self.url,
+                'ssl_options': {
+                    'ssl_version': 'PROTOCOL_TLSv1_2',
+                    'cert_reqs': 'CERT_NONE'
+                }
+            }
+        else:
+            return {'url': self.url}
     
     class Config:
         env_prefix = "RABBITMQ_"

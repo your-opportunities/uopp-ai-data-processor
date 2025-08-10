@@ -26,27 +26,23 @@ class RabbitMQRepository:
     async def connect(self) -> None:
         """Establish connection to RabbitMQ."""
         try:
+            # Get connection parameters
+            conn_params = settings.rabbitmq.connection_params
+            
             # Create connection
-            self.connection = await aio_pika.connect_robust(
-                host=settings.rabbitmq.host,
-                port=settings.rabbitmq.port,
-                login=settings.rabbitmq.username,
-                password=settings.rabbitmq.password,
-                virtualhost=settings.rabbitmq.virtual_host
-            )
+            if 'ssl_options' in conn_params:
+                self.connection = await aio_pika.connect_robust(
+                    conn_params['url'],
+                    ssl_options=conn_params['ssl_options']
+                )
+            else:
+                self.connection = await aio_pika.connect_robust(conn_params['url'])
             
             # Create channel
             self.channel = await self.connection.channel()
             await self.channel.set_qos(prefetch_count=settings.app.max_concurrent_processing)
             
-            # Declare exchange
-            self.exchange = await self.channel.declare_exchange(
-                settings.rabbitmq.exchange_name,
-                aio_pika.ExchangeType.TOPIC,
-                durable=True
-            )
-            
-            # Declare queue
+            # Declare queue directly (no exchange needed for simple queue usage)
             self.queue = await self.channel.declare_queue(
                 settings.rabbitmq.queue_name,
                 durable=True,
@@ -55,12 +51,6 @@ class RabbitMQRepository:
                     'x-max-length': 10000,  # Max 10k messages
                     'x-overflow': 'drop-head'  # Drop oldest when full
                 }
-            )
-            
-            # Bind queue to exchange
-            await self.queue.bind(
-                self.exchange,
-                routing_key=settings.rabbitmq.routing_key
             )
             
             logger.info("RabbitMQ connection established")
@@ -79,9 +69,9 @@ class RabbitMQRepository:
             await self.connection.close()
             logger.info("RabbitMQ connection closed")
     
-    async def publish_message(self, message: ProcessingMessage, routing_key: Optional[str] = None) -> None:
-        """Publish a message to RabbitMQ."""
-        if not self.exchange:
+    async def publish_message(self, message: ProcessingMessage) -> None:
+        """Publish a message to RabbitMQ queue."""
+        if not self.queue:
             raise RuntimeError("RabbitMQ not connected")
         
         try:
@@ -97,10 +87,7 @@ class RabbitMQRepository:
                 }
             )
             
-            await self.exchange.publish(
-                rabbitmq_message,
-                routing_key=routing_key or settings.rabbitmq.routing_key
-            )
+            await self.queue.publish(rabbitmq_message)
             
             logger.info("Message published", message_id=message.id)
             

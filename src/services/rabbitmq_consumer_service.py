@@ -223,47 +223,50 @@ class RabbitMQConsumerService:
     
     async def _process_message_with_retry(self, message: IncomingMessage) -> None:
         """Process message with retry logic."""
+        processing_message = None
+        
         for attempt in range(self.max_retries):
             try:
-                async with message.process():
-                    # Parse message body
-                    body = message.body.decode('utf-8')
-                    
-                    # Try to parse as JSON first, fallback to raw text
-                    try:
-                        data = json.loads(body)
-                        processing_message = ProcessingMessage.model_validate(data)
-                    except (json.JSONDecodeError, ValueError):
-                        # Handle raw text messages
-                        processing_message = ProcessingMessage(
-                            id=f"msg_{int(time.time() * 1000)}",
-                            content=body,
-                            metadata={
-                                "source": "raw_text",
-                                "original_body": body[:100] + "..." if len(body) > 100 else body
-                            }
-                        )
-                    
-                    logger.info(
-                        "Processing message",
-                        message_id=processing_message.id,
-                        attempt=attempt + 1,
-                        content_length=len(processing_message.content)
+                # Parse message body
+                body = message.body.decode('utf-8')
+                
+                # Try to parse as JSON first, fallback to raw text
+                try:
+                    data = json.loads(body)
+                    processing_message = ProcessingMessage.model_validate(data)
+                except (json.JSONDecodeError, ValueError):
+                    # Handle raw text messages
+                    processing_message = ProcessingMessage(
+                        id=f"msg_{int(time.time() * 1000)}",
+                        content=body,
+                        metadata={
+                            "source": "raw_text",
+                            "original_body": body[:100] + "..." if len(body) > 100 else body
+                        }
                     )
-                    
-                    # Call message handler
-                    await self.message_handler(processing_message)
-                    
-                    # Update statistics
-                    self.messages_processed += 1
-                    
-                    logger.info(
-                        "Message processed successfully",
-                        message_id=processing_message.id,
-                        messages_processed=self.messages_processed
-                    )
-                    
-                    return  # Success, exit retry loop
+                
+                logger.info(
+                    "Processing message",
+                    message_id=processing_message.id,
+                    attempt=attempt + 1,
+                    content_length=len(processing_message.content)
+                )
+                
+                # Call message handler
+                await self.message_handler(processing_message)
+                
+                # Update statistics
+                self.messages_processed += 1
+                
+                logger.info(
+                    "Message processed successfully",
+                    message_id=processing_message.id,
+                    messages_processed=self.messages_processed
+                )
+                
+                # Acknowledge message on success
+                await message.ack()
+                return  # Success, exit retry loop
                 
             except Exception as e:
                 logger.error(
@@ -285,8 +288,9 @@ class RabbitMQConsumerService:
                         error=str(e)
                     )
                     
-                    # Reject message and don't requeue (will go to dead letter queue)
-                    await message.reject(requeue=False)
+                    # Always acknowledge the message to prevent reprocessing
+                    # This follows the error handling strategy: log error, skip DB insert, ack message
+                    await message.ack()
     
     async def _wait_for_connection_close(self) -> None:
         """Wait for connection to close or shutdown signal."""
