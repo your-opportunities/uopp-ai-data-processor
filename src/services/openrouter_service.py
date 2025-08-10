@@ -1,0 +1,270 @@
+"""OpenRouter API service for Ukrainian event extraction."""
+
+import json
+import time
+import asyncio
+from typing import Optional, Dict, Any
+from datetime import datetime, timedelta
+import aiohttp
+from aiohttp import ClientTimeout, ClientSession
+from aiohttp.client_exceptions import ClientError, ClientResponseError
+
+from ..config.settings import settings
+from ..models.ukrainian_event import (
+    UkrainianEvent, OpenRouterRequest, OpenRouterResponse, OpenRouterMessage,
+    create_ukrainian_event_prompt
+)
+from ..utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+
+class RateLimiter:
+    """Simple rate limiter for API calls."""
+    
+    def __init__(self, max_calls_per_minute: int):
+        self.max_calls_per_minute = max_calls_per_minute
+        self.calls = []
+        self._lock = asyncio.Lock()
+    
+    async def acquire(self) -> None:
+        """Acquire permission to make an API call."""
+        async with self._lock:
+            now = datetime.utcnow()
+            # Remove calls older than 1 minute
+            self.calls = [call_time for call_time in self.calls 
+                         if now - call_time < timedelta(minutes=1)]
+            
+            # Check if we can make another call
+            if len(self.calls) >= self.max_calls_per_minute:
+                # Wait until we can make another call
+                oldest_call = min(self.calls)
+                wait_time = 60 - (now - oldest_call).total_seconds()
+                if wait_time > 0:
+                    logger.info(f"Rate limit reached, waiting {wait_time:.2f} seconds")
+                    await asyncio.sleep(wait_time)
+            
+            # Add current call
+            self.calls.append(now)
+
+
+class OpenRouterService:
+    """OpenRouter API service for Ukrainian event extraction."""
+    
+    def __init__(self):
+        self.api_url = settings.openrouter.api_url
+        self.api_key = settings.openrouter.api_key
+        self.model = settings.openrouter.model
+        self.max_tokens = settings.openrouter.max_tokens
+        self.temperature = settings.openrouter.temperature
+        self.max_retries = settings.openrouter.max_retries
+        self.retry_delay = settings.openrouter.retry_delay
+        
+        # Rate limiting
+        self.rate_limiter = RateLimiter(settings.openrouter.rate_limit_per_minute)
+        
+        # HTTP client
+        self._session: Optional[ClientSession] = None
+        self._timeout = ClientTimeout(total=60, connect=10)
+        
+        # Statistics
+        self.calls_made = 0
+        self.calls_failed = 0
+        self.last_call_time: Optional[datetime] = None
+    
+    async def __aenter__(self):
+        """Async context manager entry."""
+        await self.connect()
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        await self.disconnect()
+    
+    async def connect(self) -> None:
+        """Initialize HTTP client."""
+        if self._session is None or self._session.closed:
+            self._session = ClientSession(
+                timeout=self._timeout,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://uopp-ai-data-processor",
+                    "X-Title": "UOPP AI Data Processor"
+                }
+            )
+            logger.info("OpenRouter service initialized")
+    
+    async def disconnect(self) -> None:
+        """Close HTTP client."""
+        if self._session and not self._session.closed:
+            await self._session.close()
+            self._session = None
+            logger.info("OpenRouter service disconnected")
+    
+    async def extract_ukrainian_event(self, text: str) -> UkrainianEvent:
+        """Extract structured Ukrainian event data from text."""
+        if not self._session:
+            raise RuntimeError("OpenRouter service not connected")
+        
+        start_time = time.time()
+        
+        try:
+            # Wait for rate limiter
+            await self.rate_limiter.acquire()
+            
+            # Create prompt for Ukrainian event extraction
+            messages = create_ukrainian_event_prompt(text)
+            
+            # Prepare request
+            request_data = OpenRouterRequest(
+                model=self.model,
+                messages=messages,
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+                stream=False
+            )
+            
+            # Make API call with retry logic
+            response_data = await self._make_api_call_with_retry(request_data)
+            
+            # Parse response
+            openrouter_response = OpenRouterResponse.model_validate(response_data)
+            
+            # Extract content from response
+            if not openrouter_response.choices:
+                raise ValueError("No choices in OpenRouter response")
+            
+            content = openrouter_response.choices[0].message.content
+            
+            # Parse JSON response
+            try:
+                event_data = json.loads(content)
+            except json.JSONDecodeError as e:
+                logger.error("Failed to parse JSON response", error=str(e), content=content)
+                raise ValueError(f"Invalid JSON response from API: {str(e)}")
+            
+            # Validate and create UkrainianEvent
+            ukrainian_event = UkrainianEvent.model_validate(event_data)
+            
+            processing_time = time.time() - start_time
+            self.calls_made += 1
+            self.last_call_time = datetime.utcnow()
+            
+            logger.info(
+                "Ukrainian event extraction completed",
+                processing_time=processing_time,
+                tokens_used=openrouter_response.usage.total_tokens if openrouter_response.usage else None,
+                title=ukrainian_event.title,
+                categories=ukrainian_event.categories
+            )
+            
+            return ukrainian_event
+            
+        except Exception as e:
+            processing_time = time.time() - start_time
+            self.calls_failed += 1
+            
+            logger.error(
+                "Ukrainian event extraction failed",
+                error=str(e),
+                processing_time=processing_time,
+                text_preview=text[:100] + "..." if len(text) > 100 else text
+            )
+            raise
+    
+    async def _make_api_call_with_retry(self, request_data: OpenRouterRequest) -> Dict[str, Any]:
+        """Make API call with retry logic."""
+        last_exception = None
+        
+        for attempt in range(self.max_retries):
+            try:
+                return await self._make_api_call(request_data)
+                
+            except ClientResponseError as e:
+                last_exception = e
+                if e.status in [429, 500, 502, 503, 504]:  # Retryable errors
+                    logger.warning(
+                        "API call failed, retrying",
+                        attempt=attempt + 1,
+                        max_attempts=self.max_retries,
+                        status_code=e.status,
+                        error=str(e)
+                    )
+                    if attempt < self.max_retries - 1:
+                        await asyncio.sleep(self.retry_delay * (2 ** attempt))  # Exponential backoff
+                    continue
+                else:
+                    raise  # Non-retryable error
+                    
+            except (ClientError, asyncio.TimeoutError) as e:
+                last_exception = e
+                logger.warning(
+                    "API call failed, retrying",
+                    attempt=attempt + 1,
+                    max_attempts=self.max_retries,
+                    error=str(e)
+                )
+                if attempt < self.max_retries - 1:
+                    await asyncio.sleep(self.retry_delay * (2 ** attempt))
+                continue
+        
+        # All retries failed
+        raise last_exception or Exception("API call failed after all retries")
+    
+    async def _make_api_call(self, request_data: OpenRouterRequest) -> Dict[str, Any]:
+        """Make a single API call."""
+        url = f"{self.api_url}/chat/completions"
+        
+        async with self._session.post(
+            url,
+            json=request_data.model_dump(exclude_none=True)
+        ) as response:
+            response.raise_for_status()
+            return await response.json()
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """Perform health check on OpenRouter API."""
+        if not self._session:
+            return {"status": "disconnected"}
+        
+        try:
+            # Try a simple request to check API connectivity
+            url = f"{self.api_url}/models"
+            async with self._session.get(url) as response:
+                if response.status == 200:
+                    return {
+                        "status": "healthy",
+                        "calls_made": self.calls_made,
+                        "calls_failed": self.calls_failed,
+                        "last_call_time": self.last_call_time.isoformat() if self.last_call_time else None
+                    }
+                else:
+                    return {"status": "unhealthy", "status_code": response.status}
+        except Exception as e:
+            logger.error("OpenRouter health check failed", error=str(e))
+            return {"status": "error", "error": str(e)}
+    
+    async def get_model_info(self) -> Optional[Dict[str, Any]]:
+        """Get information about available models."""
+        if not self._session:
+            return None
+        
+        try:
+            url = f"{self.api_url}/models"
+            async with self._session.get(url) as response:
+                response.raise_for_status()
+                return await response.json()
+        except Exception as e:
+            logger.error("Failed to get model info", error=str(e))
+            return None
+    
+    def get_statistics(self) -> Dict[str, Any]:
+        """Get service statistics."""
+        return {
+            "calls_made": self.calls_made,
+            "calls_failed": self.calls_failed,
+            "success_rate": (self.calls_made - self.calls_failed) / max(self.calls_made, 1) * 100,
+            "last_call_time": self.last_call_time.isoformat() if self.last_call_time else None,
+            "rate_limit_per_minute": self.rate_limiter.max_calls_per_minute
+        }

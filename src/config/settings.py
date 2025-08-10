@@ -40,17 +40,20 @@ class PostgresSettings(BaseSettings):
         env_prefix = "POSTGRES_"
 
 
-class DeepSeekSettings(BaseSettings):
-    """DeepSeek API settings."""
+class OpenRouterSettings(BaseSettings):
+    """OpenRouter API settings."""
     
-    api_url: str = Field(default="https://api.deepseek.com/v1", env="DEEPSEEK_API_URL")
-    api_key: str = Field(env="DEEPSEEK_API_KEY")
-    model: str = Field(default="deepseek-chat", env="DEEPSEEK_MODEL")
-    max_tokens: int = Field(default=4096, env="DEEPSEEK_MAX_TOKENS")
-    temperature: float = Field(default=0.1, env="DEEPSEEK_TEMPERATURE")
+    api_url: str = Field(default="https://openrouter.ai/api/v1", env="OPENROUTER_API_URL")
+    api_key: str = Field(env="OPENROUTER_API_KEY")
+    model: str = Field(default="deepseek/deepseek-r1:free", env="OPENROUTER_MODEL")
+    max_tokens: int = Field(default=2048, env="OPENROUTER_MAX_TOKENS")
+    temperature: float = Field(default=0.1, env="OPENROUTER_TEMPERATURE")
+    max_retries: int = Field(default=3, env="OPENROUTER_MAX_RETRIES")
+    retry_delay: float = Field(default=1.0, env="OPENROUTER_RETRY_DELAY")
+    rate_limit_per_minute: int = Field(default=60, env="OPENROUTER_RATE_LIMIT_PER_MINUTE")
     
     class Config:
-        env_prefix = "DEEPSEEK_"
+        env_prefix = "OPENROUTER_"
 
 
 class AppSettings(BaseSettings):
@@ -74,7 +77,7 @@ class Settings(BaseSettings):
     
     rabbitmq: RabbitMQSettings = RabbitMQSettings()
     postgres: PostgresSettings = PostgresSettings()
-    deepseek: DeepSeekSettings = DeepSeekSettings()
+    openrouter: OpenRouterSettings = OpenRouterSettings()
     app: AppSettings = AppSettings()
     
     class Config:

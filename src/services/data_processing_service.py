@@ -9,7 +9,7 @@ from ..config.settings import settings
 from ..models.message import ProcessingMessage, ProcessingResult, ProcessingStatus
 from ..repositories.postgres_repository import PostgresRepository
 from ..repositories.rabbitmq_repository import RabbitMQRepository
-from ..services.deepseek_service import DeepSeekService
+from ..services.openrouter_service import OpenRouterService
 from ..services.rabbitmq_consumer_service import RabbitMQConsumerService
 from ..utils.logger import get_logger
 
@@ -22,7 +22,7 @@ class DataProcessingService:
     def __init__(self):
         self.postgres_repo = PostgresRepository()
         self.rabbitmq_repo = RabbitMQRepository()
-        self.deepseek_service = DeepSeekService()
+        self.openrouter_service = OpenRouterService()
         self.consumer_service = RabbitMQConsumerService(self._process_message)
         self._processing_semaphore: Optional[asyncio.Semaphore] = None
         self._running = False
@@ -38,7 +38,7 @@ class DataProcessingService:
             # Connect to databases and services
             await self.postgres_repo.connect()
             await self.rabbitmq_repo.connect()
-            await self.deepseek_service.connect()
+            await self.openrouter_service.connect()
             
             # Create database tables
             await self.postgres_repo.create_tables()
@@ -65,7 +65,7 @@ class DataProcessingService:
             await self.consumer_service.stop()
             
             # Disconnect from services
-            await self.deepseek_service.disconnect()
+            await self.openrouter_service.disconnect()
             await self.rabbitmq_repo.disconnect()
             await self.postgres_repo.disconnect()
             
@@ -115,9 +115,10 @@ class DataProcessingService:
         await self.postgres_repo.update_processing_status(status)
         
         try:
-            # Extract structured data using DeepSeek
+            # Extract structured data using OpenRouter
             logger.info("Extracting structured data", message_id=message.id)
-            structured_data = await self.deepseek_service.extract_structured_data(message.content)
+            ukrainian_event = await self.openrouter_service.extract_ukrainian_event(message.content)
+            structured_data = ukrainian_event.model_dump()
             
             # Update progress
             status.progress = 0.5
@@ -132,7 +133,7 @@ class DataProcessingService:
                 processed_content=structured_data,
                 processing_time=processing_time,
                 success=True,
-                model_used=settings.deepseek.model,
+                model_used=settings.openrouter.model,
                 confidence_score=0.8  # Placeholder, could be extracted from API response
             )
             
@@ -176,7 +177,7 @@ class DataProcessingService:
             processing_time=0.0,
             success=False,
             error_message=error_message,
-            model_used=settings.deepseek.model
+            model_used=settings.openrouter.model
         )
         
         await self.postgres_repo.save_processing_result(result)
@@ -196,7 +197,7 @@ class DataProcessingService:
         return {
             "postgres": await self.postgres_repo.pool is not None,
             "rabbitmq": await self.rabbitmq_repo.health_check(),
-            "deepseek": await self.deepseek_service.health_check(),
+            "openrouter": await self.openrouter_service.health_check(),
             "consumer": await self.consumer_service.health_check()
         }
     

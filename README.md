@@ -6,7 +6,7 @@ An asynchronous data processing service that consumes messages from RabbitMQ, pr
 
 - **Asynchronous Processing**: Built with asyncio for high-performance concurrent processing
 - **Message Queue Integration**: Consumes messages from RabbitMQ with automatic retry logic
-- **AI-Powered Extraction**: Uses DeepSeek API for intelligent structured data extraction
+- **AI-Powered Extraction**: Uses OpenRouter API for intelligent Ukrainian event extraction
 - **Persistent Storage**: Stores results in PostgreSQL with comprehensive tracking
 - **Structured Logging**: Comprehensive logging with structured output
 - **Health Monitoring**: Built-in health checks for all services
@@ -38,7 +38,8 @@ uopp-ai-data-processor/
 │       ├── __init__.py
 │       └── logger.py     # Logging configuration
 ├── examples/             # Example scripts
-│   └── consumer_example.py  # RabbitMQ consumer usage example
+│   ├── consumer_example.py  # RabbitMQ consumer usage example
+│   └── ukrainian_event_extraction.py  # Ukrainian event extraction example
 ├── main.py               # Application entry point
 ├── requirements.txt      # Python dependencies
 ├── env.template          # Environment variables template
@@ -101,13 +102,16 @@ POSTGRES_USERNAME=postgres
 POSTGRES_PASSWORD=password
 ```
 
-### DeepSeek API Configuration
+### OpenRouter API Configuration
 ```env
-DEEPSEEK_API_URL=https://api.deepseek.com/v1
-DEEPSEEK_API_KEY=your_deepseek_api_key_here
-DEEPSEEK_MODEL=deepseek-chat
-DEEPSEEK_MAX_TOKENS=4096
-DEEPSEEK_TEMPERATURE=0.1
+OPENROUTER_API_URL=https://openrouter.ai/api/v1
+OPENROUTER_API_KEY=your_openrouter_api_key_here
+OPENROUTER_MODEL=deepseek/deepseek-r1:free
+OPENROUTER_MAX_TOKENS=2048
+OPENROUTER_TEMPERATURE=0.1
+OPENROUTER_MAX_RETRIES=3
+OPENROUTER_RETRY_DELAY=1.0
+OPENROUTER_RATE_LIMIT_PER_MINUTE=60
 ```
 
 ### Application Configuration
@@ -178,6 +182,33 @@ await consumer.start()
 
 See `examples/consumer_example.py` for a complete usage example.
 
+### Ukrainian Event Extraction
+
+The OpenRouter service can extract structured event data from Ukrainian text:
+
+```python
+from src.services.openrouter_service import OpenRouterService
+
+async def extract_event():
+    service = OpenRouterService()
+    await service.connect()
+    
+    text = "Вебінар 'Основи Python' завтра о 15:00 онлайн. Безкоштовно."
+    event = await service.extract_ukrainian_event(text)
+    
+    print(f"Title: {event.title}")
+    print(f"Categories: {event.categories}")
+    print(f"Format: {event.format}")
+    print(f"ASAP: {event.is_asap}")
+    
+    await service.disconnect()
+
+# Run extraction
+asyncio.run(extract_event())
+```
+
+See `examples/ukrainian_event_extraction.py` for a complete usage example.
+
 ### Monitoring
 
 The service provides several monitoring endpoints and features:
@@ -226,7 +257,7 @@ mypy src/ main.py
 ### Components
 
 1. **DataProcessingService**: Main orchestrator that coordinates the entire pipeline
-2. **DeepSeekService**: Handles API calls to DeepSeek for data extraction
+2. **OpenRouterService**: Specialized service for Ukrainian event extraction
 3. **PostgresRepository**: Manages database operations and result storage
 4. **RabbitMQRepository**: Handles message publishing
 5. **RabbitMQConsumerService**: Robust consumer with reconnection and error handling
