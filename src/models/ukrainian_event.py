@@ -77,19 +77,7 @@ class UkrainianEvent(BaseModel):
     date: Optional[str] = Field(None, description="Event date in ISO format (YYYY-MM-DD) or null")
     deadline: Optional[str] = Field(None, description="Application deadline in ISO format (YYYY-MM-DD) or null")
     
-    @validator('title')
-    def validate_title(cls, v):
-        """Validate title is not empty."""
-        if not v or not v.strip():
-            raise ValueError("Title cannot be empty")
-        return v.strip()
-    
-    @validator('categories')
-    def validate_categories(cls, v):
-        """Validate categories list is not empty."""
-        if not v:
-            raise ValueError("At least one category must be specified")
-        return v
+
     
     @validator('price')
     def validate_price(cls, v):
@@ -103,6 +91,29 @@ class UkrainianEvent(BaseModel):
                 return float(v)
             except ValueError:
                 raise ValueError("Price must be numeric, 'free', or null")
+        return v
+    
+    @validator('title', pre=True)
+    def validate_title(cls, v):
+        """Validate and provide default for title."""
+        if v is None or not v or not v.strip():
+            raise ValueError("Title cannot be empty or null")
+        return v.strip()
+    
+    @validator('format', pre=True)
+    def validate_format(cls, v):
+        """Validate and provide default for format."""
+        if v is None:
+            raise ValueError("Format cannot be null")
+        if v not in ['offline', 'online']:
+            raise ValueError("Format must be 'offline' or 'online'")
+        return v
+    
+    @validator('categories', pre=True)
+    def validate_categories(cls, v):
+        """Validate and provide default for categories."""
+        if v is None or not v or len(v) == 0:
+            raise ValueError("At least one category must be specified")
         return v
 
 
@@ -163,24 +174,32 @@ def create_ukrainian_event_prompt(text: str) -> List[OpenRouterMessage]:
     
     system_prompt = """Ти - експерт з аналізу українських текстів та витягування структурованих даних про події.
 
+ВАЖЛИВО: ВСІ ПОЛЯ ПОВИННІ БУТИ ЗАПОВНЕНІ. НЕ ПОВЕРТАЙ null.
+
 Твоє завдання - проаналізувати текст та витягнути інформацію про подію у форматі JSON.
 
-Поля для витягування:
-- title: коротка назва події/контенту
-- is_asap: boolean (чи є терміновим/urgent)
-- is_regular_event: boolean (чи є звичайною подією, не терміновою/разовою)
-- format: "offline" або "online"
-- categories: список категорій з фіксованого набору
-- detailed_location: адреса/місце проведення або null
-- city: назва міста або null
-- price: числове значення, "free" або null
-- date: дата події у форматі ISO (YYYY-MM-DD) або null
-- deadline: дедлайн подачі заявки у форматі ISO (YYYY-MM-DD) або null
+ОБОВ'ЯЗКОВІ ПОЛЯ:
+- title: коротка назва події (ЗАВЖДИ ЗАПОВНЮЙ)
+- format: "offline" або "online" (ЗАВЖДИ ЗАПОВНЮЙ)
+- categories: список категорій (ЗАВЖДИ МІНІМУМ 1)
+- is_asap: true/false (чи є терміновим)
+- is_regular_event: true/false (чи є звичайною подією)
 
-Доступні категорії:
-вебінар, волонтерство, грант, конкурс, конференція, курс, лекція, майстер-клас, хакатон, обмін, вакансія, проєкт, стажування, стипендія, табір, турнір, тренінг, відпочинок, концерт, виступ, презентація, семінар, форум, панельна дискусія, зустріч, квест, інтерактивна виставка, фестиваль, ярмарок, кінопоказ, театральна постановка, благодійна подія, демонстрація, воркшоп, онлайн-курс, дебати, інтенсив, спортивні змагання, екскурсія, читання, арт-перформанс, гастрономічний захід, нетворкінг сесія, відкриття, тестування, демо-день, пітчинг, тренувальний табір
+ДОПОВНЮВАЛЬНІ ПОЛЯ (можуть бути null):
+- detailed_location: адреса/місце проведення
+- city: назва міста
+- price: число, "free" або null
+- date: дата події (YYYY-MM-DD)
+- deadline: дедлайн подачі (YYYY-MM-DD)
 
-Поверни тільки валідний JSON без додаткового тексту."""
+Категорії: вебінар, волонтерство, грант, конкурс, конференція, курс, лекція, майстер-клас, хакатон, обмін, вакансія, проєкт, стажування, стипендія, табір, турнір, тренінг, відпочинок, концерт, виступ, презентація, семінар, форум, панельна дискусія, зустріч, квест, інтерактивна виставка, фестиваль, ярмарок, кінопоказ, театральна постановка, благодійна подія, демонстрація, воркшоп, онлайн-курс, дебати, інтенсив, спортивні змагання, екскурсія, читання, арт-перформанс, гастрономічний захід, нетворкінг сесія, відкриття, тестування, демо-день, пітчинг, тренувальний табір
+
+ПРАВИЛА:
+1. ВСІ ПОЛЯ ПОВИННІ БУТИ ЗАПОВНЕНІ (не null)
+2. is_asap та is_regular_event - завжди true/false
+3. Якщо не впевнений - використову найближчу відповідність
+
+Поверни тільки JSON без додаткового тексту."""
 
     user_prompt = f"Проаналізуй наступний текст та витягни інформацію про подію:\n\n{text}"
     

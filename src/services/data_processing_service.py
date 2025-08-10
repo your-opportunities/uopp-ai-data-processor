@@ -143,8 +143,13 @@ class DataProcessingService:
                     error=str(api_error)
                 )
                 # Create a minimal event with basic info even if API extraction fails
+                # Extract a meaningful title from the content
+                content_preview = message.content[:100] if len(message.content) > 100 else message.content
+                cleaned_content = content_preview.replace('"', '').replace('\n', ' ')
+                title = f"Failed to extract: {cleaned_content}"
+                
                 ukrainian_event = UkrainianEvent(
-                    title=f"Failed to extract: {message.content[:50]}...",
+                    title=title,
                     is_asap=False,
                     is_regular_event=True,
                     format="offline",  # Default value

@@ -172,8 +172,40 @@ class OpenRouterService:
                         logger.error("No JSON found in response", content=content)
                         raise ValueError("No valid JSON found in API response")
             
+            # Log the parsed data for debugging
+            logger.info("Parsed event data from API", event_data=event_data)
+            
             # Validate and create UkrainianEvent
-            ukrainian_event = UkrainianEvent.model_validate(event_data)
+            try:
+                ukrainian_event = UkrainianEvent.model_validate(event_data)
+            except Exception as validation_error:
+                logger.error("Validation failed for API response", error=str(validation_error), event_data=event_data)
+                
+                # Try to fix common issues
+                fixed_data = event_data.copy()
+                
+                # Fix title if null or empty
+                if not fixed_data.get('title') or fixed_data.get('title') is None:
+                    fixed_data['title'] = "Подія без назви"
+                
+                # Fix format if null
+                if not fixed_data.get('format') or fixed_data.get('format') is None:
+                    fixed_data['format'] = "offline"
+                
+                # Fix categories if null or empty
+                if not fixed_data.get('categories') or fixed_data.get('categories') is None or len(fixed_data.get('categories', [])) == 0:
+                    fixed_data['categories'] = ["волонтерство"]
+                
+                # Fix is_asap if null (default to False for non-urgent events)
+                if fixed_data.get('is_asap') is None:
+                    fixed_data['is_asap'] = False
+                
+                # Fix is_regular_event if null (default to True for regular events)
+                if fixed_data.get('is_regular_event') is None:
+                    fixed_data['is_regular_event'] = True
+                
+                logger.info("Attempting to create event with fixed data", fixed_data=fixed_data)
+                ukrainian_event = UkrainianEvent.model_validate(fixed_data)
             
             processing_time = time.time() - start_time
             self.calls_made += 1
