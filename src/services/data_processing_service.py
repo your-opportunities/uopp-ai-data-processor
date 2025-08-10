@@ -146,11 +146,14 @@ class DataProcessingService:
                 ukrainian_event = UkrainianEvent(
                     title=f"Failed to extract: {message.content[:50]}...",
                     is_asap=False,
+                    is_regular_event=True,
                     format="offline",  # Default value
                     categories=[EventCategory.VOLUNTEERING],  # Default category
                     detailed_location=None,
                     city=None,
-                    price=None
+                    price=None,
+                    date=None,
+                    deadline=None
                 )
                 logger.info("Created fallback event for failed extraction", message_id=message.id)
             

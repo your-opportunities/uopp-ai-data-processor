@@ -37,6 +37,7 @@ class MigrationManager:
         self.migrations = [
             Migration(1, "create_processed_events_table", self._migration_001_create_processed_events_table),
             Migration(2, "add_search_indexes", self._migration_002_add_search_indexes),
+            Migration(3, "add_new_fields_indexes", self._migration_003_add_new_fields_indexes),
         ]
         # Sort by version
         self.migrations.sort(key=lambda m: m.version)
@@ -234,3 +235,28 @@ class MigrationManager:
             ON processed_events ((extracted_data->>'price')) 
             WHERE (extracted_data->>'price') != 'free' AND (extracted_data->>'price') IS NOT NULL
         """)
+    
+    async def _migration_003_add_new_fields_indexes(self, conn: asyncpg.Connection) -> None:
+        """Add indexes for new fields (is_regular_event, date, deadline)."""
+        # Index for regular events
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_processed_events_regular 
+            ON processed_events ((extracted_data->>'is_regular_event')) 
+            WHERE (extracted_data->>'is_regular_event') = 'true'
+        """)
+        
+        # Index for events with dates
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_processed_events_with_date 
+            ON processed_events ((extracted_data->>'date')) 
+            WHERE (extracted_data->>'date') IS NOT NULL
+        """)
+        
+        # Index for events with deadlines
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_processed_events_with_deadline 
+            ON processed_events ((extracted_data->>'deadline')) 
+            WHERE (extracted_data->>'deadline') IS NOT NULL
+        """)
+        
+        logger.info("New fields indexes added successfully")

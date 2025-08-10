@@ -68,11 +68,14 @@ class UkrainianEvent(BaseModel):
     
     title: str = Field(..., description="Short title of the event/content")
     is_asap: bool = Field(..., description="Whether the event is urgent/терміново")
+    is_regular_event: bool = Field(default=True, description="Whether this is a regular event (not urgent/one-time)")
     format: EventFormat = Field(..., description="Event format: offline or online")
     categories: List[EventCategory] = Field(..., description="Event categories from predefined set")
     detailed_location: Optional[str] = Field(None, description="Address/venue or null")
     city: Optional[str] = Field(None, description="City name or null")
     price: Optional[Union[float, str]] = Field(None, description="Numeric value, 'free', or null")
+    date: Optional[str] = Field(None, description="Event date in ISO format (YYYY-MM-DD) or null")
+    deadline: Optional[str] = Field(None, description="Application deadline in ISO format (YYYY-MM-DD) or null")
     
     @validator('title')
     def validate_title(cls, v):
@@ -165,11 +168,14 @@ def create_ukrainian_event_prompt(text: str) -> List[OpenRouterMessage]:
 Поля для витягування:
 - title: коротка назва події/контенту
 - is_asap: boolean (чи є терміновим/urgent)
+- is_regular_event: boolean (чи є звичайною подією, не терміновою/разовою)
 - format: "offline" або "online"
 - categories: список категорій з фіксованого набору
 - detailed_location: адреса/місце проведення або null
 - city: назва міста або null
 - price: числове значення, "free" або null
+- date: дата події у форматі ISO (YYYY-MM-DD) або null
+- deadline: дедлайн подачі заявки у форматі ISO (YYYY-MM-DD) або null
 
 Доступні категорії:
 вебінар, волонтерство, грант, конкурс, конференція, курс, лекція, майстер-клас, хакатон, обмін, вакансія, проєкт, стажування, стипендія, табір, турнір, тренінг, відпочинок, концерт, виступ, презентація, семінар, форум, панельна дискусія, зустріч, квест, інтерактивна виставка, фестиваль, ярмарок, кінопоказ, театральна постановка, благодійна подія, демонстрація, воркшоп, онлайн-курс, дебати, інтенсив, спортивні змагання, екскурсія, читання, арт-перформанс, гастрономічний захід, нетворкінг сесія, відкриття, тестування, демо-день, пітчинг, тренувальний табір
