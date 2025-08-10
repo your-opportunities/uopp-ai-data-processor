@@ -84,13 +84,8 @@ Copy `env.template` to `.env` and configure the following variables:
 
 ### RabbitMQ Configuration
 ```env
-RABBITMQ_HOST=localhost
-RABBITMQ_PORT=5672
-RABBITMQ_USERNAME=guest
-RABBITMQ_PASSWORD=guest
+RABBITMQ_URL=amqp://guest:guest@localhost:5672/
 RABBITMQ_QUEUE_NAME=data_processing_queue
-RABBITMQ_EXCHANGE_NAME=data_processing_exchange
-RABBITMQ_ROUTING_KEY=data_processing
 ```
 
 ### PostgreSQL Configuration

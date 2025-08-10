@@ -84,14 +84,19 @@ class OpenRouterService:
     async def connect(self) -> None:
         """Initialize HTTP client."""
         if self._session is None or self._session.closed:
+            headers = {
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://uopp-ai-data-processor",
+                "X-Title": "UOPP AI Data Processor"
+            }
+            
+            # Add Authorization header only if API key is provided
+            if self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
+            
             self._session = ClientSession(
                 timeout=self._timeout,
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "https://uopp-ai-data-processor",
-                    "X-Title": "UOPP AI Data Processor"
-                }
+                headers=headers
             )
             logger.info("OpenRouter service initialized")
     
@@ -137,12 +142,35 @@ class OpenRouterService:
             
             content = openrouter_response.choices[0].message.content
             
-            # Parse JSON response
+            # Parse JSON response (handle markdown code blocks)
             try:
+                # Try to parse as pure JSON first
                 event_data = json.loads(content)
-            except json.JSONDecodeError as e:
-                logger.error("Failed to parse JSON response", error=str(e), content=content)
-                raise ValueError(f"Invalid JSON response from API: {str(e)}")
+            except json.JSONDecodeError:
+                # If that fails, try to extract JSON from markdown code blocks
+                import re
+                
+                # Look for JSON in markdown code blocks
+                json_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', content, re.DOTALL)
+                if json_match:
+                    json_content = json_match.group(1).strip()
+                    try:
+                        event_data = json.loads(json_content)
+                    except json.JSONDecodeError as e:
+                        logger.error("Failed to parse JSON from markdown", error=str(e), content=content)
+                        raise ValueError(f"Invalid JSON in markdown response: {str(e)}")
+                else:
+                    # Try to find JSON object without markdown
+                    json_match = re.search(r'\{.*\}', content, re.DOTALL)
+                    if json_match:
+                        try:
+                            event_data = json.loads(json_match.group(0))
+                        except json.JSONDecodeError as e:
+                            logger.error("Failed to parse extracted JSON", error=str(e), content=content)
+                            raise ValueError(f"Invalid JSON response from API: {str(e)}")
+                    else:
+                        logger.error("No JSON found in response", content=content)
+                        raise ValueError("No valid JSON found in API response")
             
             # Validate and create UkrainianEvent
             ukrainian_event = UkrainianEvent.model_validate(event_data)

@@ -42,15 +42,10 @@ class RabbitMQRepository:
             self.channel = await self.connection.channel()
             await self.channel.set_qos(prefetch_count=settings.app.max_concurrent_processing)
             
-            # Declare queue directly (no exchange needed for simple queue usage)
+            # Declare queue with minimal configuration for compatibility
             self.queue = await self.channel.declare_queue(
                 settings.rabbitmq.queue_name,
-                durable=True,
-                arguments={
-                    'x-message-ttl': 24 * 60 * 60 * 1000,  # 24 hours TTL
-                    'x-max-length': 10000,  # Max 10k messages
-                    'x-overflow': 'drop-head'  # Drop oldest when full
-                }
+                durable=True
             )
             
             logger.info("RabbitMQ connection established")

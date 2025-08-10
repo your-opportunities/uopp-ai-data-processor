@@ -30,7 +30,7 @@ class ProcessingResult(BaseModel):
     success: bool = Field(..., description="Whether processing was successful")
     error_message: Optional[str] = Field(default=None, description="Error message if processing failed")
     timestamp: datetime = Field(default_factory=datetime.utcnow, description="Processing timestamp")
-    model_used: str = Field(..., description="AI model used for processing")
+    ai_model: str = Field(..., description="AI model used for processing")
     confidence_score: Optional[float] = Field(default=None, description="Confidence score of the result")
     
     class Config:

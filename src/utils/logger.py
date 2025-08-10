@@ -85,7 +85,7 @@ def log_startup_info() -> None:
     
     logger.info(
         "Configuration loaded",
-        rabbitmq_host=settings.rabbitmq.host,
+        rabbitmq_url=settings.rabbitmq.url,
         postgres_host=settings.postgres.host,
         openrouter_model=settings.openrouter.model,
     )

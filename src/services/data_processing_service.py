@@ -2,11 +2,12 @@
 
 import asyncio
 import time
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 from datetime import datetime
 
 from ..config.settings import settings
 from ..models.message import ProcessingMessage, ProcessingResult, ProcessingStatus
+from ..models.ukrainian_event import UkrainianEvent, EventCategory
 from ..repositories.rabbitmq_repository import RabbitMQRepository
 from ..repositories.event_repository import EventRepository
 from ..services.openrouter_service import OpenRouterService
@@ -24,7 +25,7 @@ class DataProcessingService:
         self.event_repo = EventRepository()
         self.rabbitmq_repo = RabbitMQRepository()
         self.openrouter_service = OpenRouterService()
-        self.consumer_service = RabbitMQConsumerService(self._process_message)
+        self.consumer_service = RabbitMQConsumerService(self._process_message, self.rabbitmq_repo)
         self.migration_manager = MigrationManager()
         self._processing_semaphore: Optional[asyncio.Semaphore] = None
         self._running = False
@@ -120,6 +121,16 @@ class DataProcessingService:
         try:
             # Step 1: Extract structured data using OpenRouter
             logger.info("Extracting structured data", message_id=message.id)
+            
+            # Check if OpenRouter API key is configured
+            if not settings.openrouter.api_key:
+                logger.warning(
+                    "OpenRouter API key not configured, skipping event extraction",
+                    message_id=message.id
+                )
+                self.messages_failed += 1
+                return
+            
             try:
                 ukrainian_event = await self.openrouter_service.extract_ukrainian_event(message.content)
                 self.api_calls_made += 1
@@ -131,9 +142,17 @@ class DataProcessingService:
                     message_id=message.id,
                     error=str(api_error)
                 )
-                # Continue processing - skip DB insert but acknowledge message
-                self.messages_failed += 1
-                return
+                # Create a minimal event with basic info even if API extraction fails
+                ukrainian_event = UkrainianEvent(
+                    title=f"Failed to extract: {message.content[:50]}...",
+                    is_asap=False,
+                    format="offline",  # Default value
+                    categories=[EventCategory.VOLUNTEERING],  # Default category
+                    detailed_location=None,
+                    city=None,
+                    price=None
+                )
+                logger.info("Created fallback event for failed extraction", message_id=message.id)
             
             # Step 2: Save event to database
             logger.info("Saving event to database", message_id=message.id)
