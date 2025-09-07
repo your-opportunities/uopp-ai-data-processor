@@ -40,7 +40,7 @@ class RabbitMQRepository:
             
             # Create channel
             self.channel = await self.connection.channel()
-            await self.channel.set_qos(prefetch_count=settings.app.max_concurrent_processing)
+            await self.channel.set_qos(prefetch_count=1)  # Process one message at a time
             
             # Declare queue with minimal configuration for compatibility
             self.queue = await self.channel.declare_queue(

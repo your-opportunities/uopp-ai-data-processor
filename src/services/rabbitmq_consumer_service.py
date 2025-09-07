@@ -3,6 +3,7 @@
 import asyncio
 import json
 import time
+from datetime import datetime
 from typing import Any, Callable, Dict, Optional, Awaitable
 from aio_pika import IncomingMessage
 
@@ -28,7 +29,7 @@ class RabbitMQConsumerService:
         self.message_handler = message_handler
         self.rabbitmq_repo = rabbitmq_repo
         self.queue_name = queue_name or settings.rabbitmq.queue_name
-        self.prefetch_count = prefetch_count or settings.app.max_concurrent_processing
+        self.prefetch_count = prefetch_count or 1  # Process one message at a time
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         
@@ -79,8 +80,8 @@ class RabbitMQConsumerService:
             queue = self.rabbitmq_repo.queue
             channel = self.rabbitmq_repo.channel
             
-            # Set QoS for this consumer
-            await channel.set_qos(prefetch_count=self.prefetch_count)
+            # Set QoS for this consumer - process one message at a time
+            await channel.set_qos(prefetch_count=1)
             
             # Start consuming
             self._consumer_tag = await queue.consume(self._process_message)
@@ -104,27 +105,48 @@ class RabbitMQConsumerService:
     
     async def _process_message_with_retry(self, message: IncomingMessage) -> None:
         """Process message with retry logic."""
-        processing_message = None
+        # Parse message body once, outside the retry loop
+        body = message.body.decode('utf-8')
         
+        # Log message receipt for tracking
+        logger.debug(
+            "Received message for processing",
+            message_size=len(body),
+            message_type="raw_text" if not self._is_json(body) else "json"
+        )
+        
+        # Try to parse as JSON first, fallback to raw text
+        try:
+            data = json.loads(body)
+            processing_message = ProcessingMessage.model_validate(data)
+        except (json.JSONDecodeError, ValueError):
+            # Handle raw text messages
+            # Basic validation for raw text content
+            if not body or not body.strip():
+                logger.warning("Received empty raw text message, acknowledging and skipping")
+                await message.ack()  # Acknowledge empty messages to avoid reprocessing
+                return
+            
+            if len(body.strip()) < 10:
+                logger.warning("Received very short raw text message, may not be meaningful", content_length=len(body.strip()))
+            
+            processing_message = ProcessingMessage(
+                id=f"msg_{int(time.time() * 1000)}",
+                content=body.strip(),
+                timestamp=datetime.utcnow(),
+                source="raw_text",
+                metadata={
+                    "source": "raw_text",
+                    "original_body": body,
+                    "parsed_at": datetime.utcnow().isoformat(),
+                    "content_length": len(body),
+                    "trimmed_content_length": len(body.strip())
+                }
+            )
+        
+        # Now retry only the actual processing
         for attempt in range(self.max_retries):
             try:
-                # Parse message body
-                body = message.body.decode('utf-8')
-                
-                # Try to parse as JSON first, fallback to raw text
-                try:
-                    data = json.loads(body)
-                    processing_message = ProcessingMessage.model_validate(data)
-                except (json.JSONDecodeError, ValueError):
-                    # Handle raw text messages
-                    processing_message = ProcessingMessage(
-                        id=f"msg_{int(time.time() * 1000)}",
-                        content=body,
-                        metadata={
-                            "source": "raw_text",
-                            "original_body": body
-                        }
-                    )
                 
                 logger.info(
                     "Processing message",
@@ -147,6 +169,11 @@ class RabbitMQConsumerService:
                 
                 # Acknowledge message on success
                 await message.ack()
+                logger.debug(
+                    "Message acknowledged successfully",
+                    message_id=processing_message.id,
+                    total_processed=self.messages_processed
+                )
                 return  # Success, exit retry loop
                 
             except Exception as e:
@@ -229,3 +256,11 @@ class RabbitMQConsumerService:
     def is_running(self) -> bool:
         """Check if the consumer is running."""
         return self._running
+    
+    def _is_json(self, text: str) -> bool:
+        """Check if a string is valid JSON."""
+        try:
+            json.loads(text)
+            return True
+        except (json.JSONDecodeError, ValueError):
+            return False

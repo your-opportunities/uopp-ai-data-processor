@@ -96,7 +96,7 @@ class AppSettings(BaseSettings):
     name: str = Field(default="uopp-ai-data-processor", alias="APP_NAME")
     env: str = Field(default="development", alias="APP_ENV")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
-    max_concurrent_processing: int = Field(default=10, alias="MAX_CONCURRENT_PROCESSING")
+    max_concurrent_processing: int = Field(default=1, alias="MAX_CONCURRENT_PROCESSING")
     retry_attempts: int = Field(default=3, alias="RETRY_ATTEMPTS")
     retry_delay: int = Field(default=5, alias="RETRY_DELAY")
     health_check_interval: int = Field(default=30, alias="HEALTH_CHECK_INTERVAL")

@@ -8,8 +8,8 @@ from datetime import datetime
 from ..config.settings import settings
 from ..models.message import ProcessingMessage, ProcessingResult, ProcessingStatus
 from ..models.ukrainian_event import UkrainianEvent, EventCategory
-from ..repositories.rabbitmq_repository import RabbitMQRepository
 from ..repositories.event_repository import EventRepository
+from ..repositories.rabbitmq_repository import RabbitMQRepository
 from ..services.openrouter_service import OpenRouterService
 from ..services.location_processing_service import LocationProcessingService
 from ..services.rabbitmq_consumer_service import RabbitMQConsumerService
@@ -45,9 +45,10 @@ class DataProcessingService:
         """Start the data processing service."""
         try:
             logger.info("Starting data processing service")
+            logger.info("🔄 Sequential processing enabled - processing one message at a time to avoid API exhaustion")
             
-            # Initialize semaphore for concurrent processing
-            self._processing_semaphore = asyncio.Semaphore(settings.app.max_concurrent_processing)
+            # Initialize semaphore for sequential processing (one message at a time)
+            self._processing_semaphore = asyncio.Semaphore(1)
             
             # Run database migrations
             await self.migration_manager.run_migrations()
