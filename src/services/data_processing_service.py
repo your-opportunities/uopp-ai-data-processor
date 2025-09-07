@@ -137,9 +137,10 @@ class DataProcessingService:
                 return
             
             try:
+                logger.info("🤖 Starting API extraction", message_id=message.id)
                 ukrainian_event = await self.openrouter_service.extract_ukrainian_event(message.content)
                 self.api_calls_made += 1
-                logger.info("API extraction successful", message_id=message.id)
+                logger.info("✅ API extraction successful", message_id=message.id)
             except Exception as api_error:
                 self.api_calls_failed += 1
                 logger.error(

@@ -165,14 +165,24 @@ class RabbitMQConsumerService:
                     if is_rate_limit:
                         wait_time = min(60 * (2 ** attempt), 300)  # Max 5 minutes
                         logger.warning(
-                            "Rate limit detected, waiting longer before retry",
+                            "🚫 Rate limit detected - waiting for API availability before retry",
                             wait_seconds=wait_time,
-                            attempt=attempt + 1
+                            attempt=attempt + 1,
+                            max_attempts=self.max_retries,
+                            message_id=getattr(processing_message, 'id', 'unknown')
                         )
+                        await asyncio.sleep(wait_time)
+                        logger.info("✅ Rate limit wait completed - retrying message processing")
                     else:
                         wait_time = self.retry_delay * (attempt + 1)
-                    
-                    await asyncio.sleep(wait_time)
+                        logger.warning(
+                            "⚠️ Processing failed - waiting before retry",
+                            wait_seconds=wait_time,
+                            attempt=attempt + 1,
+                            max_attempts=self.max_retries,
+                            message_id=getattr(processing_message, 'id', 'unknown')
+                        )
+                        await asyncio.sleep(wait_time)
                 else:
                     # Final attempt failed - don't acknowledge ANY error, let RabbitMQ retry
                     self.messages_failed += 1
