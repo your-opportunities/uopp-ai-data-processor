@@ -244,15 +244,28 @@ class OpenRouterService:
             except ClientResponseError as e:
                 last_exception = e
                 if e.status in [429, 500, 502, 503, 504]:  # Retryable errors
-                    logger.warning(
-                        "API call failed, retrying",
-                        attempt=attempt + 1,
-                        max_attempts=self.max_retries,
-                        status_code=e.status,
-                        error=str(e)
-                    )
+                    # For rate limits (429), use much longer delays
+                    if e.status == 429:
+                        delay = min(60 * (2 ** attempt), 300)  # Max 5 minutes
+                        logger.warning(
+                            "Rate limit hit, waiting longer before retry",
+                            attempt=attempt + 1,
+                            max_attempts=self.max_retries,
+                            delay_seconds=delay,
+                            error=str(e)
+                        )
+                    else:
+                        delay = self.retry_delay * (2 ** attempt)
+                        logger.warning(
+                            "API call failed, retrying",
+                            attempt=attempt + 1,
+                            max_attempts=self.max_retries,
+                            status_code=e.status,
+                            error=str(e)
+                        )
+                    
                     if attempt < self.max_retries - 1:
-                        await asyncio.sleep(self.retry_delay * (2 ** attempt))  # Exponential backoff
+                        await asyncio.sleep(delay)
                     continue
                 else:
                     raise  # Non-retryable error

@@ -67,9 +67,9 @@ class OpenRouterSettings(BaseSettings):
     model: str = Field(default="deepseek/deepseek-r1:free", alias="OPENROUTER_MODEL")
     max_tokens: int = Field(default=2048, alias="OPENROUTER_MAX_TOKENS")
     temperature: float = Field(default=0.1, alias="OPENROUTER_TEMPERATURE")
-    max_retries: int = Field(default=3, alias="OPENROUTER_MAX_RETRIES")
+    max_retries: int = Field(default=5, alias="OPENROUTER_MAX_RETRIES")
     retry_delay: float = Field(default=1.0, alias="OPENROUTER_RETRY_DELAY")
-    rate_limit_per_minute: int = Field(default=60, alias="OPENROUTER_RATE_LIMIT_PER_MINUTE")
+    rate_limit_per_minute: int = Field(default=30, alias="OPENROUTER_RATE_LIMIT_PER_MINUTE")
     
     class Config:
         env_file = ".env"

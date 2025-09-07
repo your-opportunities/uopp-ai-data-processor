@@ -143,29 +143,12 @@ class DataProcessingService:
             except Exception as api_error:
                 self.api_calls_failed += 1
                 logger.error(
-                    "API extraction failed",
+                    "API extraction failed - message will be retried",
                     message_id=message.id,
                     error=str(api_error)
                 )
-                # Create a minimal event with basic info even if API extraction fails
-                # Extract a meaningful title from the content
-                content_preview = message.content[:100] if len(message.content) > 100 else message.content
-                cleaned_content = content_preview.replace('"', '').replace('\n', ' ')
-                title = f"Failed to extract: {cleaned_content}"
-                
-                ukrainian_event = UkrainianEvent(
-                    title=title,
-                    is_asap=False,
-                    is_regular_event=True,
-                    format="offline",  # Default value
-                    categories=[EventCategory.VOLUNTEERING],  # Default category
-                    detailed_location=None,
-                    city=None,
-                    price=None,
-                    date=None,
-                    deadline=None
-                )
-                logger.info("Created fallback event for failed extraction", message_id=message.id)
+                # Any API error means no database save - let message retry
+                raise
             
             # Step 2: Enrich event with location data
             logger.info("Enriching event with location data", message_id=message.id)
@@ -181,12 +164,13 @@ class DataProcessingService:
                 else:
                     logger.debug("No location data added to event", message_id=message.id)
             except Exception as location_error:
-                logger.warning(
-                    "Location enrichment failed, continuing with original event",
+                logger.error(
+                    "Location enrichment failed - message will be retried",
                     message_id=message.id,
                     error=str(location_error)
                 )
-                # Continue processing even if location enrichment fails
+                # Any location error means no database save - let message retry
+                raise
             
             # Step 3: Save event to database
             logger.info("Saving event to database", message_id=message.id)
@@ -202,13 +186,12 @@ class DataProcessingService:
             except Exception as db_error:
                 self.db_operations_failed += 1
                 logger.error(
-                    "Database save failed",
+                    "Database save failed - message will be retried",
                     message_id=message.id,
                     error=str(db_error)
                 )
-                # Continue processing - acknowledge message even if DB save failed
-                self.messages_failed += 1
-                return
+                # Any database error means no save - let message retry
+                raise
             
             # Success - update statistics
             processing_time = time.time() - start_time

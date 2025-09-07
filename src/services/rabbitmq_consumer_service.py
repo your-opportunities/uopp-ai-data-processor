@@ -122,7 +122,7 @@ class RabbitMQConsumerService:
                         content=body,
                         metadata={
                             "source": "raw_text",
-                            "original_body": body[:100] + "..." if len(body) > 100 else body
+                            "original_body": body
                         }
                     )
                 
@@ -157,21 +157,33 @@ class RabbitMQConsumerService:
                     error=str(e)
                 )
                 
+                # Check if this is a rate limit error for longer wait times
+                is_rate_limit = "429" in str(e) or "Too Many Requests" in str(e)
+                
                 if attempt < self.max_retries - 1:
-                    # Wait before retry
-                    await asyncio.sleep(self.retry_delay * (attempt + 1))
+                    # Wait before retry - longer wait for rate limits
+                    if is_rate_limit:
+                        wait_time = min(60 * (2 ** attempt), 300)  # Max 5 minutes
+                        logger.warning(
+                            "Rate limit detected, waiting longer before retry",
+                            wait_seconds=wait_time,
+                            attempt=attempt + 1
+                        )
+                    else:
+                        wait_time = self.retry_delay * (attempt + 1)
+                    
+                    await asyncio.sleep(wait_time)
                 else:
-                    # Final attempt failed
+                    # Final attempt failed - don't acknowledge ANY error, let RabbitMQ retry
                     self.messages_failed += 1
                     logger.error(
-                        "Message processing failed after all retries",
+                        "Message processing failed after all retries - message will be retried by RabbitMQ",
                         message_id=getattr(processing_message, 'id', 'unknown'),
                         error=str(e)
                     )
                     
-                    # Always acknowledge the message to prevent reprocessing
-                    # This follows the error handling strategy: log error, skip DB insert, ack message
-                    await message.ack()
+                    # Don't acknowledge - let RabbitMQ retry the message
+                    await message.reject(requeue=True)
     
 
     
